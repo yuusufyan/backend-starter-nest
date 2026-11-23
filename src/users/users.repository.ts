@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDrizzle } from '@nestjs/drizzle';
-import { sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import {
   BaseRepository,
@@ -9,11 +9,33 @@ import {
   type Result,
   type Writable,
 } from '../database/base.repository.js';
+import { roles } from '../roles/roles.schema.js';
 import { users } from './users.schema.js';
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
 type PublicUser = Result<typeof users, 'passwordHash'>;
+
+/** Identitas yang dipakai autentikasi: user aktif/tidak beserta nama role-nya. */
+export interface AuthProfile {
+  id: string;
+  email: string;
+  name: string;
+  isActive: boolean;
+  role: string;
+}
+
+/** Hanya untuk login: satu-satunya jalur yang mengembalikan `passwordHash`. */
+export type AuthCredentials = AuthProfile & { passwordHash: string };
+
+// User dengan role yang sudah soft delete tidak dianggap punya identitas (fail closed).
+const authColumns = {
+  id: users.id,
+  email: users.email,
+  name: users.name,
+  isActive: users.isActive,
+  role: roles.name,
+};
 
 /**
  * `passwordHash` (Restricted) di-omit: tidak pernah keluar dari repository ini.
@@ -57,6 +79,47 @@ export class UsersRepository extends BaseRepository<
       userId,
       tx,
     );
+  }
+
+  async findAuthProfile(
+    id: string,
+    tx?: DbExecutor,
+  ): Promise<AuthProfile | undefined> {
+    const rows = await (tx ?? this.db)
+      .select(authColumns)
+      .from(users)
+      .innerJoin(
+        roles,
+        and(eq(roles.id, users.roleId), isNull(roles.deletedAt)),
+      )
+      .where(and(eq(users.id, id), isNull(users.deletedAt)))
+      .limit(1);
+    return rows[0];
+  }
+
+  /**
+   * Untuk login saja. `passwordHash` hanya boleh dibandingkan lalu dibuang;
+   * jangan pernah meneruskannya ke response atau log.
+   */
+  async findCredentialsByEmail(
+    email: string,
+    tx?: DbExecutor,
+  ): Promise<AuthCredentials | undefined> {
+    const rows = await (tx ?? this.db)
+      .select({ ...authColumns, passwordHash: users.passwordHash })
+      .from(users)
+      .innerJoin(
+        roles,
+        and(eq(roles.id, users.roleId), isNull(roles.deletedAt)),
+      )
+      .where(
+        and(
+          sql`lower(${users.email}) = ${normalizeEmail(email)}`,
+          isNull(users.deletedAt),
+        ),
+      )
+      .limit(1);
+    return rows[0];
   }
 
   findByEmail(email: string, tx?: DbExecutor): Promise<PublicUser | undefined> {

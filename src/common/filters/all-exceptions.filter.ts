@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import type { ApiResponse } from './response.interface.js';
+import type { ApiResponse } from '../interfaces/response.interface.js';
 
 // Diport dari nest-common (all-exceptions.filter.ts). Fail closed: teks error
 // mentah hanya dikirim ke client bila NODE_ENV eksplisit development/test.

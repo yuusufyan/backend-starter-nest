@@ -131,4 +131,63 @@ describe.skipIf(!url)('Roles & Users (Postgres)', () => {
       code: '23503',
     });
   });
+
+  describe('identitas untuk autentikasi', () => {
+    it('findCredentialsByEmail: satu-satunya jalur yang membawa passwordHash, lengkap dengan nama role', async () => {
+      const created = await users.create(newUser());
+
+      const credentials = await users.findCredentialsByEmail(
+        '  ADMIN@example.com ',
+      );
+      expect(credentials).toEqual({
+        id: created.id,
+        email: 'admin@example.com',
+        name: 'Admin',
+        isActive: true,
+        role: RoleName.SuperAdmin,
+        passwordHash: 'hash-palsu', // secret-scan:ignore nilai palsu untuk test
+      });
+      expect(
+        await users.findCredentialsByEmail('lain@example.com'), // secret-scan:ignore email palsu untuk test
+      ).toBeUndefined();
+    });
+
+    it('findAuthProfile: tanpa passwordHash, dengan status aktif', async () => {
+      const created = await users.create(newUser());
+      await users.update(created.id, { isActive: false });
+
+      const profile = await users.findAuthProfile(created.id);
+      expect(profile).toEqual({
+        id: created.id,
+        email: 'admin@example.com',
+        name: 'Admin',
+        isActive: false,
+        role: RoleName.SuperAdmin,
+      });
+      expect(Object.keys(profile!)).not.toContain('passwordHash');
+      expect(
+        await users.findAuthProfile('00000000-0000-0000-0000-000000000000'),
+      ).toBeUndefined();
+    });
+
+    it('user yang sudah soft delete tidak punya identitas', async () => {
+      const created = await users.create(newUser());
+      await users.softDelete(created.id);
+
+      expect(await users.findAuthProfile(created.id)).toBeUndefined();
+      expect(
+        await users.findCredentialsByEmail('admin@example.com'), // secret-scan:ignore email palsu untuk test
+      ).toBeUndefined();
+    });
+
+    it('user dengan role yang sudah soft delete tidak punya identitas (fail closed)', async () => {
+      const created = await users.create(newUser());
+      await roles.softDelete(roleId);
+
+      expect(await users.findAuthProfile(created.id)).toBeUndefined();
+      expect(
+        await users.findCredentialsByEmail('admin@example.com'), // secret-scan:ignore email palsu untuk test
+      ).toBeUndefined();
+    });
+  });
 });

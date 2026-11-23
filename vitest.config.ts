@@ -24,7 +24,7 @@ export default defineConfig({
         'test/**',
       ],
       // Ratchet: jangan diturunkan. Naikkan bila coverage naik signifikan.
-      thresholds: { lines: 80, branches: 50, functions: 55, statements: 78 },
+      thresholds: { lines: 88, branches: 65, functions: 77, statements: 88 },
     },
   },
 });

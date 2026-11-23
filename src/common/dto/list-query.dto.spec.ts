@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { createValidationPipe } from './validation.pipe.js';
+import { createValidationPipe } from '../pipes/validation.pipe.js';
 import { ListQueryDto } from './list-query.dto.js';
 
 const meta = { type: 'query' as const, metatype: ListQueryDto };

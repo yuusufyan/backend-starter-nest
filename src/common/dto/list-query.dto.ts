@@ -12,7 +12,7 @@ import {
   MAX_LIMIT,
   type ListQuery,
   type SortDirection,
-} from '../database/list-query.js';
+} from '../../database/list-query.js';
 
 /** DTO query string untuk endpoint list; dipakai bersama `BaseRepository.findAll`. */
 export class ListQueryDto implements ListQuery {

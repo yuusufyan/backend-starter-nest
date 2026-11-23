@@ -16,10 +16,15 @@ describe('getPinoConfig', () => {
       { write: (line: string) => lines.push(line) },
     );
 
-    logger.info({ password: 'p1', a: { token: 't1', b: { email: 'e@x.id' } } });
+    logger.info({
+      password: 'p1',
+      user: { passwordHash: 'hash-rahasia', password_hash: 'hash-rahasia-2' }, // secret-scan:ignore nilai palsu untuk test
+      a: { token: 't1', b: { email: 'e@x.id' } },
+    });
 
     const out = lines.join('');
     expect(out).not.toContain('p1');
+    expect(out).not.toContain('hash-rahasia');
     expect(out).not.toContain('t1');
     expect(out).not.toContain('e@x.id');
     expect(out).toContain('[REDACTED]');

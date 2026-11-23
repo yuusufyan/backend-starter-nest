@@ -10,6 +10,8 @@ const REDACT_KEY_NAMES = [
   'oldPassword',
   'confirmPassword',
   'currentPassword',
+  'passwordHash',
+  'password_hash',
   'passwd',
   'pwd',
   'secret',

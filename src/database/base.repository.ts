@@ -39,9 +39,21 @@ export type DbExecutor = Pick<
   'select' | 'insert' | 'update' | 'delete'
 >;
 
-export interface RepositoryOptions {
+/** Baris yang dikembalikan repository: `Row<T>` tanpa kolom yang di-`omit`. */
+export type Result<
+  T extends AuditedTable,
+  TOmit extends keyof Row<T> = never,
+> = Omit<Row<T>, TOmit>;
+
+export interface RepositoryOptions<TOmit extends PropertyKey = never> {
   /** Kolom teks yang dicari lewat `term` (ILIKE). Kosong = pencarian dimatikan. */
   searchColumns?: AnyPgColumn[];
+  /**
+   * Kolom yang tidak pernah dikembalikan (mis. `passwordHash`): dibuang dari
+   * SELECT/RETURNING dan tidak bisa dipakai di `sortBy`. Menulis ke kolom itu
+   * tetap diizinkan lewat `create`/`update`.
+   */
+  omit?: readonly TOmit[];
 }
 
 /**
@@ -60,26 +72,33 @@ export interface RepositoryOptions {
  * Semua method mengabaikan baris yang sudah soft delete. Untuk beberapa tulis
  * dalam satu transaksi, kirim `tx` sebagai argumen terakhir.
  */
-export class BaseRepository<T extends AuditedTable> {
+export class BaseRepository<
+  T extends AuditedTable,
+  TOmit extends keyof Row<T> = never,
+> {
   // Generik Drizzle tidak bisa dipersempit sampai ke tipe hasil query, jadi
-  // query dibangun di atas `PgTable` biasa dan hasilnya di-cast ke `Row<T>`.
+  // query dibangun di atas `PgTable` biasa dan hasilnya di-cast ke `Result`.
   private readonly t: PgTable;
+  // Kolom yang boleh keluar (semua kolom tabel dikurangi `omit`).
   private readonly columns: Record<string, AnyPgColumn>;
 
   constructor(
     protected readonly db: NodePgDatabase,
     protected readonly table: T,
-    private readonly options: RepositoryOptions = {},
+    private readonly options: RepositoryOptions<TOmit> = {},
   ) {
     this.t = table;
-    this.columns = getColumns(table) as Record<string, AnyPgColumn>;
+    const hidden = new Set<PropertyKey>(options.omit ?? []);
+    this.columns = Object.fromEntries(
+      Object.entries(getColumns(table)).filter(([key]) => !hidden.has(key)),
+    ) as Record<string, AnyPgColumn>;
   }
 
   async findAll(
     query: ListQuery = {},
     extraWhere?: SQL,
     tx?: DbExecutor,
-  ): Promise<Page<Row<T>>> {
+  ): Promise<Page<Result<T, TOmit>>> {
     const exec = tx ?? this.db;
     const { page, limit, offset } = normalizePagination(query);
     const where = and(
@@ -90,7 +109,7 @@ export class BaseRepository<T extends AuditedTable> {
 
     const [rows, totals] = await Promise.all([
       exec
-        .select()
+        .select(this.columns)
         .from(this.t)
         .where(where)
         .orderBy(...this.orderBy(query))
@@ -101,7 +120,7 @@ export class BaseRepository<T extends AuditedTable> {
 
     const total = Number(totals[0]?.total ?? 0);
     return {
-      data: rows as Row<T>[],
+      data: rows as Result<T, TOmit>[],
       total,
       page,
       limit,
@@ -109,25 +128,28 @@ export class BaseRepository<T extends AuditedTable> {
     };
   }
 
-  async findById(id: Id<T>, tx?: DbExecutor): Promise<Row<T> | undefined> {
+  async findById(
+    id: Id<T>,
+    tx?: DbExecutor,
+  ): Promise<Result<T, TOmit> | undefined> {
     const rows = await (tx ?? this.db)
-      .select()
+      .select(this.columns)
       .from(this.t)
       .where(this.alive(id))
       .limit(1);
-    return rows[0] as Row<T> | undefined;
+    return rows[0] as Result<T, TOmit> | undefined;
   }
 
   async create(
     values: Writable<T>,
     userId?: string,
     tx?: DbExecutor,
-  ): Promise<Row<T>> {
+  ): Promise<Result<T, TOmit>> {
     const rows = await (tx ?? this.db)
       .insert(this.t)
       .values({ ...values, createdBy: userId, updatedBy: userId })
-      .returning();
-    return rows[0] as Row<T>;
+      .returning(this.columns);
+    return rows[0] as Result<T, TOmit>;
   }
 
   async update(
@@ -135,13 +157,13 @@ export class BaseRepository<T extends AuditedTable> {
     values: Partial<Writable<T>>,
     userId?: string,
     tx?: DbExecutor,
-  ): Promise<Row<T> | undefined> {
+  ): Promise<Result<T, TOmit> | undefined> {
     const rows = await (tx ?? this.db)
       .update(this.t)
       .set({ ...values, updatedBy: userId })
       .where(this.alive(id))
-      .returning();
-    return rows[0] as Row<T> | undefined;
+      .returning(this.columns);
+    return rows[0] as Result<T, TOmit> | undefined;
   }
 
   /** Soft delete. Mengembalikan `false` bila baris tidak ada / sudah terhapus. */
@@ -156,6 +178,22 @@ export class BaseRepository<T extends AuditedTable> {
       .where(this.alive(id))
       .returning({ id: this.table.id });
     return rows.length > 0;
+  }
+
+  /**
+   * Untuk subclass: satu baris yang cocok dengan `where` (belum soft delete),
+   * dengan kolom yang sama seperti method lain (kolom `omit` tetap tersembunyi).
+   */
+  protected async findOneBy(
+    where: SQL,
+    tx?: DbExecutor,
+  ): Promise<Result<T, TOmit> | undefined> {
+    const rows = await (tx ?? this.db)
+      .select(this.columns)
+      .from(this.t)
+      .where(and(where, isNull(this.table.deletedAt)))
+      .limit(1);
+    return rows[0] as Result<T, TOmit> | undefined;
   }
 
   /** Baris dengan `id` tertentu yang belum soft delete. */
